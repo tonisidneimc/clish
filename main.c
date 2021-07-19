@@ -1,51 +1,21 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/wait.h>
 #include <unistd.h>
+#include <sys/wait.h>
+#include <readline/readline.h>
+#include <readline/history.h>
 #include <string.h>
+#include <signal.h>
+
+#define clear() printf("\033[H\033[J")
 
 #define SHELL_BUFSIZE 1024
-
-char* shell_read_line() {
-  int bufsize = SHELL_BUFSIZE;
-  char* buffer = malloc(sizeof(char) * bufsize);
-  
-  if(!buffer) {
-    fprintf(stderr, "buffer allocation error\n");
-    exit(1); // EXIT_FAILURE
-  }
-  int c;
-  int position = 0;
-  
-  while(1) {
-    c = getchar();
-    
-    if(c == EOF || c == '\n'){
-      // hit EOF or EOL
-      // replace it with null character and return the buffer
-      buffer[position] = '\0';
-      return buffer;
-    } else {
-      buffer[position] = c;
-    }
-    position++;
-    
-    if(position >= bufsize) {
-      // has exceeded the buffer, reallocate
-      bufsize += SHELL_BUFSIZE;
-      buffer = realloc(buffer, bufsize);
-      if(!buffer) {
-        fprintf(stderr, "buffer allocation error\n");
-        exit(1); // EXIT_FAILURE
-      }
-    }
-  }
-}
 
 #define SHELL_TOK_BUFSIZE 64
 #define SHELL_TOK_DELIM " \t\r\n\a"
 
 char** shell_split_line(char* line) {
+  
   int bufsize = SHELL_TOK_BUFSIZE;
   int position = 0;
   char** tk_list = malloc(bufsize * sizeof(char*));
@@ -122,7 +92,7 @@ int shell_num_builtins() {
 }
 
 int shell_cd(char** args) {
-  if(args[1] != NULL) {
+  if(args[1] == NULL) {
     fprintf(stderr, "shell: expected argument to \'cd\'\n");
   } else {
     if(chdir(args[1]) != 0) {
@@ -133,15 +103,19 @@ int shell_cd(char** args) {
 }
 
 int shell_help(char** args) {
-  int i;
-  printf("Shell\n");
+
+  printf("\x1b[1;33m");
+  printf("Shell");
+  printf("\x1b[0m\n");
   printf("Type program names and arguments, and hit enter.\n");
   printf("The following are built in:\n");
   
-  for(i = 0; i < shell_num_builtins(); i++) {
+  printf("\x1b[1;31m");
+  for(int i = 0; i < shell_num_builtins(); i++) {
     printf(" %s\n", builtin_str[i]);
   }
-  printf("Use the man command for information on other programs.\n");
+  printf("\x1b[0m");
+  printf("Use the\x1b[1;31m man\x1b[0m command for information on other programs.\n");
   return 1;
 }
 
@@ -163,25 +137,49 @@ int shell_execute(char** args) {
   return shell_launch(args);
 }
 
+#define MAX_PROMPT_SIZE 1024
+#define MAX_CWD_SIZE 512 
+
 void shell_loop() {
-  char* line;
+
+  char cwd[MAX_CWD_SIZE]; // for current working directory
+  char prompt[MAX_PROMPT_SIZE];
+  char* buffer;
   char** args;
-  int status;
+  int status = 1;
+  
+  signal(SIGINT, SIG_IGN); // just ignore Ctrl-C
+  
+  clear();
   
   do {
-    printf("> ");
-    line = shell_read_line();
-    args = shell_split_line(line);
+    if(!getcwd(cwd, sizeof(cwd))) {
+      fprintf(stderr, "shell: cannot get current working directory\n");
+      break;
+    }
+    int len = snprintf(prompt, sizeof(prompt), "%s%s%s:%s%s%s$ ", 
+                       "\x1b[1;36m", getenv("USER"), "\x1b[0m",
+                       "\x1b[1;34m", cwd, "\x1b[0m");
+    prompt[len] = '\0';
+
+    buffer = readline(prompt);
+  
+    if(strlen(buffer) == 0)
+      continue;
+    
+    add_history(buffer);
+    
+    args = shell_split_line(buffer);
     status = shell_execute(args);
     
-    free(line);
+    free(buffer);
     free(args);
     
   } while(status);
 }
 
 int main(int argc, char** argv) {
-
+  
   shell_loop();
   
   return 0; // EXIT_SUCCESS
